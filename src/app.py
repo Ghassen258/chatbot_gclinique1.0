@@ -30,16 +30,16 @@ import os, sys, socket, webbrowser
 
 def get_base_path():
     if getattr(sys, 'frozen', False):
-        # Running as a bundled executable
+        # If running as a bundled executable
         return os.path.dirname(sys.executable)
     else:
-        # Running in a normal Python environment
+        # Normal Python environment
         return os.path.abspath(os.path.dirname(__file__))
 
 base_path = get_base_path()
 
-# Path to the .env file (parent directory)
-dotenv_path = os.path.join(base_path, '..', '.env')
+# Path to the .env file (same directory)
+dotenv_path = os.path.join(base_path, ".env")
 
 # Load the .env file
 load_dotenv(dotenv_path)
@@ -549,13 +549,16 @@ def num_tokens_from_string(string: str) -> int:
     logger.info(f"Tokens estimés pour la chaîne: {tokens}")
     return tokens
 
-def init_database_cached(host, user, password, database):
+def init_database_cached(host, user, password, database, port):
     """
     Initialize the database connection using SQLAlchemy with a dynamically created connection string.
     """
     try:
-        # Construct the connection string
-        connection_string = f"mssql+pyodbc://{user}:{password}@{host}/{database}?driver=ODBC+Driver+17+for+SQL+Server"
+        # Construct the connection string with the given host and port
+        connection_string = (
+            f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?"
+            f"driver=ODBC+Driver+17+for+SQL+Server"
+        )
         # Create the engine
         engine = create_engine(connection_string)
         # Test the connection
@@ -570,6 +573,7 @@ def init_database_cached(host, user, password, database):
         logger.error(f"Error connecting to the database: {e}")
         st.error("Erreur de connexion à la base de données.")
         return None, None
+
 
 
 @st.cache_data
@@ -1505,14 +1509,33 @@ if "current_conversation" not in st.session_state:
 # Sidebar pour les paramètres de connexion à la base de données et gestion des conversations
 with st.sidebar:
     st.subheader("Paramètres de Connexion")
-    st.write("Entrez les détails de connexion à la base de données SQL Server.")
-    host = st.text_input("Hôte (ex: localhost\\SQLEXPRESS)", value="localhost\\SQLEXPRESS", key="Host")
+    st.write("Entrez les détails de connexion à la base de données SQL Server exposée en ligne.")
+    
+    host = st.text_input("Hôte (ex: xxxx.ngrok.io)", key="Host")
+    port = st.text_input("Port (ex: 1433 ou celui fourni par ngrok)", key="Port")
     user = st.text_input("Utilisateur", value="sa", key="User")
     password = st.text_input("Mot de passe", type="password", value="123", key="Password")
     database = st.text_input("Base de données", value="GClinique", key="Database")
+
     if st.button("Se Connecter"):
         with st.spinner("Connexion à la base de données..."):
-            db, engine = init_database_cached(host, user, password, database)
+            # Construct the connection string with separate host and port
+            try:
+                # Make sure port is an integer
+                port_int = int(port)
+            except ValueError:
+                st.error("Le port doit être un nombre entier. Veuillez corriger et réessayer.")
+                st.stop()
+
+            # Construct the SQLAlchemy connection URL
+            connection_string = (
+                f"mssql+pyodbc://{user}:{password}@{host}:{port_int}/{database}"
+                f"?driver=ODBC+Driver+17+for+SQL+Server"
+            )
+
+            # Attempt to initialize the database
+            db, engine = init_database_cached(host, user, password, database, port_int)
+
             if db and engine:
                 st.session_state.db = db
                 st.session_state.engine = engine
@@ -1522,6 +1545,7 @@ with st.sidebar:
                 currency = get_global_currency(engine)
                 st.session_state.currency = currency
                 logger.info(f"Devise stockée dans la session: {currency}")
+
     st.markdown("---")
     st.subheader("Gestion des Conversations")
     if st.session_state.conversations:
@@ -1697,3 +1721,5 @@ if user_query is not None and user_query.strip() != "":
         st.session_state.conversations[current_convo]["chat_history"].append(AIMessage(content=response_message))
         st.session_state.conversations[current_convo]["figures"].append({'visualization': None, 'table': None})
         logger.warning("Utilisateur a tenté de poser une question sans être connecté à la base de données.")
+
+

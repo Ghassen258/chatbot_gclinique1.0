@@ -1,0 +1,9 @@
+2024-12-10 17:19:56,009 DEBUG 
+2024-12-10 17:19:56,009 DEBUG You can now view your Streamlit app in your browser.
+2024-12-10 17:19:56,009 DEBUG 
+2024-12-10 17:19:56,009 DEBUG Local URL: http://localhost:8501
+2024-12-10 17:19:56,316 ERROR Failed to create WebView window: create_window() got an unexpected keyword argument 'gui'
+Traceback (most recent call last):
+  File "run_with_webview.py", line 104, in try_webview
+    webview.create_window("Chatbot App", app_url, width=1200, height=800, gui='edgechromium')
+TypeError: create_window() got an unexpected keyword argument 'gui'
