@@ -553,11 +553,7 @@ def num_tokens_from_string(string: str) -> int:
     
 @st.cache_data
 def init_database_cached(host, user, password, database, port):
-    """
-    Try an ODBC connection (Driver 17), then fall back to pymssql if ODBC
-    errors out on SSL protocol. Returns (SessionLocal, engine).
-    """
-    # 1) Prepare the ODBC URL
+    # Build the ODBC connect string & URL
     odbc_str = (
         "DRIVER={ODBC Driver 17 for SQL Server};"
         f"SERVER={host},{port};"
@@ -567,32 +563,35 @@ def init_database_cached(host, user, password, database, port):
     )
     odbc_url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
 
-    # helper to build pymssql URL
+    # Build the pymssql URL
     pymssql_url = f"mssql+pymssql://{user}:{password}@{host}:{port}/{database}"
 
     for driver_name, url in (("ODBC", odbc_url), ("pymssql", pymssql_url)):
         try:
-            engine = create_engine(url, fast_executemany=True)
-            # quick smoke‑test
+            if driver_name == "ODBC":
+                engine = create_engine(
+                    url,
+                    connect_args={"fast_executemany": True},
+                )
+            else:
+                engine = create_engine(url)
+
+            # smoke‐test
             with engine.connect():
                 logger.info(f"{driver_name} connection successful.")
+
             SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
             return SessionLocal, engine
 
         except OperationalError as e:
-            msg = str(e).lower()
-            # if it's our known SSL handshake issue or a generic failure
             logger.warning(f"{driver_name} connect failed: {e}")
-            # on ODBC failure, continue to pymssql; on pymssql failure, re‑raise
-            if driver_name == "ODBC" and "ssl" in msg:
+            # only fallback from ODBC on SSL/TLS errors
+            if driver_name == "ODBC" and "ssl" in str(e).lower():
                 logger.info("Falling back to pymssql driver.")
                 continue
-            raise  # no fallback beyond pymssql
+            raise
 
-    # Should never get here
-    raise RuntimeError("Could not establish a database connection with any driver.")
-
-
+    raise RuntimeError("Could not connect with either ODBC or pymssql")
 
 
 @st.cache_data
