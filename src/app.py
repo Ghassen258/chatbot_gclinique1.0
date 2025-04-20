@@ -559,8 +559,7 @@ def init_database_cached(host, user, password, database, port):
         f"DATABASE={database};"
         f"UID={user};"
         f"PWD={password};"
-        "Encrypt=yes;"
-        "TrustServerCertificate=yes;"
+        "Encrypt=no;"
         "Connection Timeout=30;"
     )
     conn_url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
