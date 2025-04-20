@@ -552,7 +552,6 @@ def num_tokens_from_string(string: str) -> int:
     
 @st.cache_data
 def init_database_cached(host, user, password, database, port):
-    # Build a single ODBC connection string with encryption/trust flags
     odbc_str = (
         f"DRIVER={{ODBC Driver 17 for SQL Server}};"
         f"SERVER={host},{port};"
@@ -562,19 +561,13 @@ def init_database_cached(host, user, password, database, port):
         "Encrypt=no;"
         "Connection Timeout=30;"
     )
-    conn_url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
+    url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
+    engine = create_engine(url, fast_executemany=True)
+    with engine.connect():
+        pass
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    return SessionLocal, engine
 
-    # Create engine (fast_executemany for bulk ops)
-    engine = create_engine(conn_url, fast_executemany=True)
-
-    # Quick connectivity test
-    with engine.connect() as conn:
-        logger.info("Streamlit DB connection test successful.")
-
-    # Prepare session factory and return a session
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = SessionLocal()
-    return db, engine
 
 
 
