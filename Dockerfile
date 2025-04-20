@@ -10,7 +10,7 @@ RUN apt-get update \
       > /etc/apt/sources.list.d/mssql-release.list \
  && apt-get update \
  && ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
-      msodbcsql18 msodbcsql17 msodbcsql13 \
+      msodbcsql18 \
  && rm -rf /var/lib/apt/lists/*
 
 # 3) Install Python dependencies
