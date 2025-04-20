@@ -25,6 +25,7 @@ import io
 import requests  # Added for HTTP requests to the backend
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import OperationalError
 import os, sys, socket, webbrowser
 
 
@@ -552,21 +553,44 @@ def num_tokens_from_string(string: str) -> int:
     
 @st.cache_data
 def init_database_cached(host, user, password, database, port):
+    """
+    Try an ODBC connection (Driver 17), then fall back to pymssql if ODBC
+    errors out on SSL protocol. Returns (SessionLocal, engine).
+    """
+    # 1) Prepare the ODBC URL
     odbc_str = (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        "DRIVER={ODBC Driver 17 for SQL Server};"
         f"SERVER={host},{port};"
         f"DATABASE={database};"
-        f"UID={user};"
-        f"PWD={password};"
-        "Encrypt=no;"
-        "Connection Timeout=30;"
+        f"UID={user};PWD={password};"
+        "Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;"
     )
-    url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
-    engine = create_engine(url, fast_executemany=True)
-    with engine.connect():
-        pass
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    return SessionLocal, engine
+    odbc_url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
+
+    # helper to build pymssql URL
+    pymssql_url = f"mssql+pymssql://{user}:{password}@{host}:{port}/{database}"
+
+    for driver_name, url in (("ODBC", odbc_url), ("pymssql", pymssql_url)):
+        try:
+            engine = create_engine(url, fast_executemany=True)
+            # quick smoke‑test
+            with engine.connect():
+                logger.info(f"{driver_name} connection successful.")
+            SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+            return SessionLocal, engine
+
+        except OperationalError as e:
+            msg = str(e).lower()
+            # if it's our known SSL handshake issue or a generic failure
+            logger.warning(f"{driver_name} connect failed: {e}")
+            # on ODBC failure, continue to pymssql; on pymssql failure, re‑raise
+            if driver_name == "ODBC" and "ssl" in msg:
+                logger.info("Falling back to pymssql driver.")
+                continue
+            raise  # no fallback beyond pymssql
+
+    # Should never get here
+    raise RuntimeError("Could not establish a database connection with any driver.")
 
 
 
