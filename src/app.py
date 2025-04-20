@@ -6,6 +6,7 @@ import logging
 import time
 import threading
 import uuid  # Import pour générer des identifiants uniques
+import urllib
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
