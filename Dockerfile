@@ -29,7 +29,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 4) Copy your app code
 COPY . /app
 
-# 5) Expose Streamlit and start your app
-EXPOSE 8501
-ENTRYPOINT ["streamlit", "run", "src/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# tell Docker/Cloud Run which port we’ll listen on
+ENV PORT 8080
+EXPOSE 8080
+
+# use shell form so $PORT is expanded at runtime
+ENTRYPOINT streamlit run src/app.py \
+  --server.port $PORT \
+  --server.address 0.0.0.0
+
 
