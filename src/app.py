@@ -551,47 +551,35 @@ def num_tokens_from_string(string: str) -> int:
     logger.info(f"Tokens estimés pour la chaîne: {tokens}")
     return tokens
     
+import urllib
+import logging
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import sessionmaker
+import streamlit as st
+
+logger = logging.getLogger(__name__)
+
 @st.cache_data
 def init_database_cached(host, user, password, database, port):
-    # Build the ODBC connect string & URL
+    # Build an ODBC connection string—turn encryption off if the server
+    # only supports older TLS versions:
     odbc_str = (
         "DRIVER={ODBC Driver 17 for SQL Server};"
         f"SERVER={host},{port};"
         f"DATABASE={database};"
         f"UID={user};PWD={password};"
-        "Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;"
+        "Encrypt=no;"                      # <-- disable if you still get SSL errors
+        "TrustServerCertificate=yes;"
+        "Connection Timeout=30;"
     )
-    odbc_url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
+    url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
 
-    # Build the pymssql URL
-    pymssql_url = f"mssql+pymssql://{user}:{password}@{host}:{port}/{database}"
-
-    for driver_name, url in (("ODBC", odbc_url), ("pymssql", pymssql_url)):
-        try:
-            if driver_name == "ODBC":
-                engine = create_engine(
-                    url,
-                    connect_args={"fast_executemany": True},
-                )
-            else:
-                engine = create_engine(url)
-
-            # smoke‐test
-            with engine.connect():
-                logger.info(f"{driver_name} connection successful.")
-
-            SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-            return SessionLocal, engine
-
-        except OperationalError as e:
-            logger.warning(f"{driver_name} connect failed: {e}")
-            # only fallback from ODBC on SSL/TLS errors
-            if driver_name == "ODBC" and "ssl" in str(e).lower():
-                logger.info("Falling back to pymssql driver.")
-                continue
-            raise
-
-    raise RuntimeError("Could not connect with either ODBC or pymssql")
+    engine = create_engine(url, connect_args={"fast_executemany": True})
+    # smoke-test
+    with engine.connect():
+        logger.info("ODBC connection successful.")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    return SessionLocal, engine
 
 
 @st.cache_data
