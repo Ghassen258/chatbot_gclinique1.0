@@ -548,7 +548,8 @@ def num_tokens_from_string(string: str) -> int:
     tokens = max(1, len(string) // 4)
     logger.info(f"Tokens estimés pour la chaîne: {tokens}")
     return tokens
-
+    
+@st.cache_data
 def init_database_cached(host, user, password, database, port):
     # Build a single ODBC connection string with encryption/trust flags
     odbc_str = (
