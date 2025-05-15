@@ -553,25 +553,31 @@ def init_database_cached(host, user, password, database, port):
     """
     Initialize the database connection using SQLAlchemy with a dynamically created connection string.
     """
+    import urllib
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    # Compose the ODBC connection string exactly like your working pyodbc.connect
+    conn_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        f"SERVER={host},{port};"
+        f"DATABASE={database};"
+        f"UID={user};PWD={password};"
+        "Encrypt=no;"
+        "TrustServerCertificate=yes;"
+        "Connection Timeout=10;"
+    )
+    connection_uri = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(conn_str)
+    engine = create_engine(connection_uri, connect_args={"fast_executemany": True})
     try:
-        # Construct the connection string with the given host and port
-        connection_string = (
-            f"mssql+pyodbc://{user}:{password}@{host}:{port}/{database}?"
-            f"driver=ODBC+Driver+17+for+SQL+Server"
-        )
-        # Create the engine
-        engine = create_engine(connection_string)
-        # Test the connection
         with engine.connect() as conn:
             logger.info("Database connection test successful.")
-        # Create sessionmaker
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        # Create session
         db = SessionLocal()
         return db, engine
     except SQLAlchemyError as e:
         logger.error(f"Error connecting to the database: {e}")
-        st.error("Erreur de connexion à la base de données.")
+        st.error(f"Erreur de connexion à la base de données: {e}")
         return None, None
 
 
