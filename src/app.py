@@ -82,6 +82,18 @@ class SessionFilter(logging.Filter):
         return True
 
 logger.addFilter(SessionFilter())
+# --- Dedicated logger for SQL queries ---
+sql_logger = logging.getLogger("sql_queries")
+sql_logger.setLevel(logging.INFO)
+sql_log_file_path = "sql_queries.log"
+sql_file_handler = logging.FileHandler(sql_log_file_path, mode='a', encoding='utf-8')
+sql_file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - Session: %(session_id)s - %(levelname)s - %(message)s'
+))
+if not sql_logger.handlers:
+    sql_logger.addHandler(sql_file_handler)
+sql_logger.addFilter(SessionFilter())
+# -----------------------------------------
 
 # Mapping des colonnes avec descriptions
 COLUMN_DESCRIPTIONS = {
@@ -460,17 +472,19 @@ def get_global_currency(engine) -> str:
     Récupère la devise globale utilisée par l'application depuis la table param.
     """
     try:
+        # Attempt to get currency from DB
         df = pd.read_sql_query("SELECT Valeur FROM param WHERE code='UNITEMONAITAIRE'", engine)
         if not df.empty and pd.notnull(df.iloc[0]['Valeur']):
             currency = df.iloc[0]['Valeur']
             logger.info(f"Devise globale trouvée: {currency}")
             return currency
         else:
-            logger.warning("Aucune devise trouvée dans la table param. Utilisation de 'USD' par défaut.")
-            return "USD"  # Valeur par défaut si aucune devise n'est trouvée
+            logger.warning("Aucune devise trouvée dans la table param. Utilisation de 'TND' par défaut.")
+            return "TND"  # Set TND as default currency
     except Exception as e:
         logger.exception(f"Erreur lors de la récupération de la devise globale: {e}")
-        return "USD"  # Valeur par défaut en cas d'erreur
+        return "TND"  # Set TND as default currency in case of error
+
 
 
 # Mapping des codes de devise aux symboles monétaires
@@ -1216,6 +1230,7 @@ def get_response(user_query: str, db: SQLDatabase, engine, chat_history: list, g
     """
     Génère une réponse en langage naturel et une visualisation basée sur la requête de l'utilisateur,
     en utilisant la devise globale stockée.
+    Log toutes les requêtes SQL et erreurs dans sql_queries.log.
     """
     try:
         currency = st.session_state.get("currency", "USD")
@@ -1235,9 +1250,11 @@ def get_response(user_query: str, db: SQLDatabase, engine, chat_history: list, g
                         "table": None,
                     }
                 try:
+                    sql_logger.info(f"User Query: {user_query}\nVisualized SQL: {last_sql_query}")
                     sql_response_df = pd.read_sql_query(last_sql_query, engine)
                     logger.info(f"Réponse SQL pour visualisation: {sql_response_df}")
                 except Exception as e:
+                    sql_logger.error(f"SQL execution failed (visualization). Query: {last_sql_query}\nError: {str(e)}")
                     logger.exception(f"Erreur lors de l'exécution de la dernière requête SQL: {e}")
                     return {
                         "response": "Erreur lors de l'exécution de la dernière requête SQL pour la visualisation.",
@@ -1289,82 +1306,271 @@ def get_response(user_query: str, db: SQLDatabase, engine, chat_history: list, g
             if not sql_query_extracted.lower().strip().startswith("select"):
                 logger.error("La requête SQL extraite ne commence pas par SELECT.")
                 return {"response": "La requête SQL générée est invalide.", "visualization": None, "table": None}
-            
+
+            # LOG the generated SQL query
+            sql_logger.info(f"User Query: {user_query}\nGenerated SQL: {sql_query_extracted}")
+
             # Vérifier si la requête utilise VPatientAI
             if "VPatientAI" in sql_query_extracted:
-                # Ajouter la définition de la vue en tant que CTE
                 view_definition = """
-                WITH VPatientAI AS (
-                    -- Contenu de la définition de la vue
-                    SELECT NumDoss
-                    , client.NumCha --- par chambre
-                    ,Services.des_service as ServiceHospitalisation --- par service 
-                    , EtaCli, RTRIM(replace(NomCli+' ' + Prenom,'  ',' ')) as NomPatient
-                    , DatNai
-                    ,Nationnalite.libnat as Nationalite  --- par nationalité
-                    , NumCIN, NumTel
-                    , AdrCli,motif.Des as MotifAdmission --- par motif d'admission
-                    ,natadm.Des as NatureAdmission -- par nature d'admission
-                    , Diagnost
-                    ,case client.NumSoc when '' then 'PAYANT' else client.NumSoc end as CodePEC, isnull(societe.dessoc,'PAYANT') as SocietePEC --- par organisme / par société de prise en charge
+WITH VPatientAI AS (
+    SELECT
+        NumDoss,
+        client.NumCha,
+        Services.des_service as ServiceHospitalisation,
+        EtaCli,
+        RTRIM(replace(NomCli+' ' + Prenom,'  ',' ')) as NomPatient,
+        DatNai,
+        Nationnalite.libnat as Nationalite,
+        NumCIN,
+        NumTel,
+        AdrCli,
+        motif.Des as MotifAdmission,
+        natadm.Des as NatureAdmission,
+        Diagnost,
+        CASE client.NumSoc WHEN '' THEN 'PAYANT' ELSE client.NumSoc END as CodePEC,
+        ISNULL(societe.dessoc,'PAYANT') as SocietePEC,
+        TypReg,
+        client.Plafond,
+        Medecin.nommed as MedecinTraitant,
+        MedSpec,
+        NomPac,
+        AdrPac,
+        TelPac,
+        NomEng,
+        CINEng,
+        TelEng,
+        client.Observ,
+        DatArr,
+        HeuArr,
+        DatDep,
+        HeuDep,
+        NumFac,
+        DatFac,
+        TypSortie.dessortie as TypeSortie,
+        MntCli as TotFactureHT,
+        MntHo as TotalHonoraire,
+        MntCliPEC as TotPECHT,
+        MntHoPEC as TotHonorairePEC,
+        client.TVAPEC,
+        MntTva as TotTVAFacture,
+        MntRem as TotRemise,
+        MntCli+MntHo+MntTva as TotFactureTTC,
+        Payer,
+        datepay,
+        ModReg,
+        TypArr.DesTyp as TypeArrive,
+        Avance,
+        NumInt,
+        MedRad,
+        MedChir,
+        ISNULL(T1.nommed,'') as MedecinCorrespondant,
+        EtabOrg,
+        Kiné,
+        Ergo,
+        Ortho,
+        client.Timbre,
+        Avoir,
+        RefPEC,
+        DatePEC,
+        NumVir,
+        MntRecu,
+        client.TimbrePEC,
+        UserCre,
+        UserFac,
+        RetenuPEC,
+        Eta_Recouv,
+        DatCIN,
+        DatCinEng,
+        Datf_Plaf,
+        Profession,
+        CodCat,
+        TypPCE,
+        Matricule,
+        typconv,
+        pere,
+        RemHO,
+        MntAvoir,
+        DatAvoir,
+        NumPec,
+        Identifiant,
+        DatDConv,
+        DatFConv,
+        DateEnt,
+        Lieu,
+        client.Resident,
+        Autoris,
+        DatAutoris,
+        HeuAutoris,
+        PER_PEC,
+        Rem_autoris,
+        User_autoris,
+        CodBurReg,
+        AnPriseCh,
+        NumOrdPriseCh,
+        NumBordCNAM,
+        Duplication,
+        OrgEmpl,
+        Archive,
+        DatRecep,
+        Classer,
+        NumCarte,
+        Memo,
+        P_Plafond,
+        Cha_Bloc,
+        num_rdv,
+        sex,
+        audit,
+        Date_audit,
+        Heure_audit,
+        User_audit,
+        DatBordCnam,
+        Copie_Pas,
+        client.usermodif,
+        Pr_Plafond,
+        Libelle_Avance,
+        MatPers,
+        CodPat,
+        client.HOPATPEC,
+        Libelle_Appurement,
+        Etat_civil,
+        Bord_PER_PEC,
+        has_piece_joint,
+        Epous,
+        EpousVeuve,
+        codMedRecommande,
+        Nature_Heberg,
+        delegation,
+        motif_urgence,
+        CliniqueCorr,
+        CodeCliniqueCorr,
+        patientAdmisPMA,
+        Port_Taxation,
+        Gouvernorat,
+        CodePostale,
+        Tel2,
+        AdresseLocale,
+        LIEN_PER_PEC,
+        NATURE_PER_PEC,
+        Code_Reservation,
+        MedUrg,
+        PersAContacter,
+        TElPersAContacter,
+        AdrPersAContacter,
+        client.Intervention_Bloc,
+        photo,
+        avoirPhoto,
+        num_sous_soc,
+        date_DebCarte,
+        date_FinCarte,
+        codAdherent,
+        Pays,
+        Num_Bordereau,
+        NumConv,
+        UserRecep,
+        NomCliAr,
+        PrenomAr,
+        Prenom2Ar,
+        EpousVeuveAr,
+        EpousAr,
+        pereAr,
+        userAutorisModifAv,
+        NumCheque,
+        client.email,
+        Accompagnant2,
+        NomPac2,
+        AdrPac2,
+        TelPac2,
+        LienPac2,
+        ANES,
+        Oeuil,
+        EXCEPTION,
+        LienPac,
+        PEC_Non_Parvenue,
+        Date_Autois_per,
+        Heure_Autois_per,
+        Code_Region,
+        TypAjusRadio,
+        Code_Prest_Cnam,
+        date_env,
+        Num_Carte,
+        Accompagnant,
+        VIP,
+        Code_Med_Charge,
+        Code_Emp_Charge,
+        VLD_EXCEPTION,
+        ancienID,
+        DatSortiePrevue,
+        lienPersAContacter,
+        numDemandeBloc,
+        numSoc2,
+        Date_Dep_Prevu,
+        Heure_Dep_Prevu,
+        Autorise_Per,
+        Recette,
+        code_TypePrest,
+        Sequence_OPD,
+        UserInstance,
+        num_cabinet,
+        ModeConsultation,
+        TypAjusPayant,
+        TypAjusOrganisme,
+        Nbre_seanceReeducation,
+        Prix_unitaire,
+        MntPatient_AlaCharge,
+        Vld_Contentieux,
+        Eta_Recouv_Patient,
+        NumBord_Transf_Cont,
+        Etat_Facture,
+        A_recep_par,
+        NumBord_Transf_Cont_Pat,
+        ImprimeBS,
+        plafond_PER_PEC,
+        CoursDollar,
+        CoursEuro,
+        verseEsp,
+        ObservationNutrition,
+        CodePrestation,
+        Date_Acte,
+        Date_Dece,
+        Heure_Dece,
+        Medecin_Dece,
+        service_Dece,
+        NumDevis,
+        Renseignement,
+        Num_CNAM_Recouv,
+        client.date_depot,
+        Vld_Contentieux_patient,
+        Etat_Cont_Patient,
+        Etat_Cont_PEC,
+        Cont_recep_Patient,
+        Cont_recep_PEC,
+        client.NomArb,
+        PrenomArb,
+        client.Per_PEC_Personnel,
+        client.Nature_Per_PEC_Personnel,
+        client.Numadmission,
+        client.Comute,
+        client.MedTrait2,
+        client.autorisConsultDMIcentral,
+        client.CINPac,
+        client.DocManquant,
+        newIdent,
+        client.NumSocMutuelle
+    FROM client 
+    LEFT OUTER JOIN Medecin ON Client.MedTrait=Medecin.CodMed
+    LEFT OUTER JOIN medecin T1 ON client.MedCorr=T1.CodMed
+    INNER JOIN chambre ON Client.NumCha=Chambre.NumCha
+    INNER JOIN motif ON Client.TypAdm=Motif.Cod
+    INNER JOIN Nationnalite ON client.nation=Nationnalite.codnat
+    INNER JOIN natadm ON client.natadm=natadm.cod
+    LEFT OUTER JOIN societe ON client.numsoc=societe.numsoc
+    LEFT OUTER JOIN TypSortie ON client.TypSortie=TypSortie.CodSortie
+    INNER JOIN TypArr ON client.TypArr=TypArr.codtyp
+    INNER JOIN Services ON Chambre.NumSer=Services.Num_Service
+)
 
-                    , TypReg, client.Plafond
-                    ,Medecin.nommed as MedecinTraitant  -- Par médecin traitant
-                    , MedSpec, NomPac, AdrPac, TelPac, NomEng, CINEng, TelEng
-                    , client.Observ, DatArr, HeuArr, DatDep, HeuDep, NumFac, DatFac
-                    ,TypSortie.dessortie as TypeSortie -- par type de sortie
-                    , MntCli as TotFactureHT -- HT FACTURE
-                    , MntHo as TotalHonoraire -- TOTAL HONORAIRE MEDECIN
-                    , MntCliPEC as TotPECHT -- HT CLINIQUE PARTIE PRISE EN CHARGE
-                    , MntHoPEC as TotHonorairePEC -- HONORAIRE  PARTIE PRISE EN CHARGE
-                    , client.TVAPEC -- TVA  PARTIE PRISE EN CHARGE
-                    , MntTva as TotTVAFacture -- TOTAL TVA
-                    , MntRem as TotRemise -- REMISE FACTURE
-                    ,MntCli+MntHo+MntTva as TotFactureTTC -- TTC Facture
-                    , Payer, datepay, ModReg
-                    ,TypArr.DesTyp as TypeArrive -- par type d'arrivée
-                    , Avance, NumInt, MedRad, MedChir
-                    ,isnull(T1.nommed,'') as MedecinCorrespondant  -- par médecin correspondant
-                    , EtabOrg
-                    , Kiné, Ergo, Ortho, client.Timbre, Avoir, RefPEC, DatePEC, NumVir, MntRecu, client.TimbrePEC, UserCre, UserFac, RetenuPEC
-                    , Eta_Recouv, DatCIN, DatCinEng, Datf_Plaf, Profession, CodCat, TypPCE, Matricule, typconv, pere, RemHO
-                    , MntAvoir, DatAvoir, NumPec, Identifiant, DatDConv, DatFConv, DateEnt, Lieu, client.Resident, Autoris, DatAutoris
-                    , HeuAutoris, PER_PEC, Rem_autoris, User_autoris, CodBurReg, AnPriseCh, NumOrdPriseCh, NumBordCNAM, Duplication
-                    , OrgEmpl, Archive, DatRecep, Classer, NumCarte, Memo, P_Plafond, Cha_Bloc, num_rdv, sex, audit, Date_audit
-                    , Heure_audit, User_audit, DatBordCnam, Copie_Pas, client.usermodif, Pr_Plafond, Libelle_Avance, MatPers, CodPat
-                    , client.HOPATPEC, Libelle_Appurement, Etat_civil, Bord_PER_PEC, has_piece_joint, Epous, EpousVeuve, codMedRecommande
-                    , Nature_Heberg, delegation, motif_urgence, CliniqueCorr, CodeCliniqueCorr, patientAdmisPMA, Port_Taxation
-                    , Gouvernorat, CodePostale, Tel2, AdresseLocale, LIEN_PER_PEC, NATURE_PER_PEC, Code_Reservation, MedUrg
-                    , PersAContacter, TElPersAContacter, AdrPersAContacter, client.Intervention_Bloc, photo, avoirPhoto, num_sous_soc
-                    , date_DebCarte, date_FinCarte, codAdherent, Pays, Num_Bordereau, NumConv, UserRecep, NomCliAr, PrenomAr
-                    , Prenom2Ar, EpousVeuveAr, EpousAr, pereAr, userAutorisModifAv, NumCheque, client.email, Accompagnant2, NomPac2
-                    , AdrPac2, TelPac2, LienPac2, ANES, Oeuil, EXCEPTION, LienPac, PEC_Non_Parvenue, Date_Autois_per, Heure_Autois_per
-                    , Code_Region, TypAjusRadio, Code_Prest_Cnam, date_env, Num_Carte, Accompagnant, VIP, Code_Med_Charge
-                    , Code_Emp_Charge, VLD_EXCEPTION, ancienID, DatSortiePrevue, lienPersAContacter, numDemandeBloc, numSoc2
-                    , Date_Dep_Prevu, Heure_Dep_Prevu, Autorise_Per, Recette, code_TypePrest, Sequence_OPD, UserInstance
-                    , num_cabinet, ModeConsultation, TypAjusPayant, TypAjusOrganisme, Nbre_seanceReeducation, Prix_unitaire
-                    , MntPatient_AlaCharge, Vld_Contentieux, Eta_Recouv_Patient, NumBord_Transf_Cont, Etat_Facture, A_recep_par
-                    , NumBord_Transf_Cont_Pat, ImprimeBS, plafond_PER_PEC, CoursDollar, CoursEuro, verseEsp, ObservationNutrition
-                    , CodePrestation, Date_Acte, Date_Dece, Heure_Dece, Medecin_Dece, service_Dece, NumDevis, Renseignement
-                    , Num_CNAM_Recouv, client.date_depot, Vld_Contentieux_patient, Etat_Cont_Patient, Etat_Cont_PEC, Cont_recep_Patient
-                    , Cont_recep_PEC, client.NomArb, PrenomArb, client.Per_PEC_Personnel, client.Nature_Per_PEC_Personnel, client.Numadmission
-                    , client.Comute, client.MedTrait2, client.autorisConsultDMIcentral, client.CINPac, client.DocManquant
-                    , newIdent, client.NumSocMutuelle,
-                    (select Valeur from param where code='UNITEMONAITAIRE') as Devise
-                    from client 
-                    left outer join Medecin on Client.MedTrait=Medecin.CodMed
-                    left outer join  medecin T1 on client.MedCorr=T1.CodMed
-                    inner join chambre on Client.NumCha=Chambre.NumCha
-                    inner join motif on Client.TypAdm=Motif.Cod
-                    inner join Nationnalite on client.nation=Nationnalite.codnat
-                    inner join natadm on client.natadm=natadm.cod
-                    left outer join societe on client.numsoc=societe.numsoc
-                    left outer join TypSortie on client.TypSortie=TypSortie.CodSortie
-                    inner join TypArr on client.TypArr=TypArr.codtyp
-                    inner join Services on Chambre.NumSer=Services.Num_Service
-                )
-                """
-                # Combiner la CTE avec la requête initiale
+"""
                 sql_query_extracted = view_definition + "\n" + sql_query_extracted
                 logger.info("La définition de VPatientAI a été ajoutée à la requête.")
 
@@ -1373,6 +1579,7 @@ def get_response(user_query: str, db: SQLDatabase, engine, chat_history: list, g
                 sql_response_df = pd.read_sql_query(sql_query_extracted, engine)
                 logger.info(f"Réponse SQL: {sql_response_df}")
             except Exception as e:
+                sql_logger.error(f"SQL execution failed. Query: {sql_query_extracted}\nError: {str(e)}")
                 logger.exception(f"Erreur lors de l'exécution de la requête SQL: {e}")
                 return {"response": "Erreur lors de l'exécution de la requête SQL.", "visualization": None, "table": None}
             if sql_response_df.empty:
@@ -1386,7 +1593,6 @@ def get_response(user_query: str, db: SQLDatabase, engine, chat_history: list, g
                 sql_response_df.to_csv(csv_buffer, index=False)
                 csv_data = csv_buffer.getvalue()
                 filename = f"query_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                # Include the downloadable file in the return value
                 downloadable_file = (filename, csv_data)
                 ai_text_response = f"Le résultat contient {total_rows} lignes, ce qui est trop volumineux pour être affiché ici. Un fichier CSV a été généré et est prêt pour le téléchargement. (Devise utilisée : {currency})"
                 return {"response": ai_text_response, "visualization": None, "table": None, "downloadable_file": downloadable_file}
@@ -1497,7 +1703,7 @@ def get_response(user_query: str, db: SQLDatabase, engine, chat_history: list, g
                     table = sql_response_df
                 return {"response": ai_response_content, "visualization": fig, "table": table}
     except Exception as e:
-        # Handle exceptions not caught by internal try-except blocks
+        sql_logger.error(f"Unexpected error in get_response: {str(e)}")
         logger.exception(f"Unexpected error in get_response: {e}")
         return {"response": "Une erreur inattendue s'est produite. Veuillez réessayer plus tard.", "visualization": None, "table": None}
 
