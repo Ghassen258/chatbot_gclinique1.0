@@ -1536,21 +1536,13 @@ with st.sidebar:
 
     if st.button("Se Connecter"):
         with st.spinner("Connexion à la base de données..."):
-            # Construct the connection string with separate host and port
             try:
-                # Make sure port is an integer
                 port_int = int(port)
             except ValueError:
                 st.error("Le port doit être un nombre entier. Veuillez corriger et réessayer.")
                 st.stop()
 
-            # Construct the SQLAlchemy connection URL
-            connection_string = (
-                f"mssql+pyodbc://{user}:{password}@{host}:{port_int}/{database}"
-                f"?driver=ODBC+Driver+17+for+SQL+Server"
-            )
-
-            # Attempt to initialize the database
+            # Only call init_database_cached, no need to re-build the string here!
             db, engine = init_database_cached(host, user, password, database, port_int)
 
             if db and engine:
@@ -1558,7 +1550,6 @@ with st.sidebar:
                 st.session_state.engine = engine
                 st.success("Connecté à la base de données !")
                 logger.info("Utilisateur connecté à la base de données.")
-                # Extraire la devise globale et la stocker dans la session
                 currency = get_global_currency(engine)
                 st.session_state.currency = currency
                 logger.info(f"Devise stockée dans la session: {currency}")
