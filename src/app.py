@@ -1533,6 +1533,26 @@ with st.sidebar:
     user = st.text_input("Utilisateur", value="sa", key="User")
     password = st.text_input("Mot de passe", type="password", value="123", key="Password")
     database = st.text_input("Base de données", value="GClinique", key="Database")
+    import streamlit as st
+import pyodbc
+
+if st.button("Test Raw Connection"):
+    try:
+        conn = pyodbc.connect(
+            "DRIVER={ODBC Driver 17 for SQL Server};"
+            "SERVER=196.179.220.15,1416;"
+            "DATABASE=GClinique;"
+            "UID=sa;PWD=your_password;"
+            "Encrypt=no;"
+            "TrustServerCertificate=yes;"
+        )
+        st.success("Raw pyodbc connection succeeded!")
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        st.write(cursor.fetchall())
+        conn.close()
+    except Exception as e:
+        st.error(f"Raw pyodbc connection failed: {e}")
 
     if st.button("Se Connecter"):
         with st.spinner("Connexion à la base de données..."):
