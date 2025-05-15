@@ -574,7 +574,7 @@ def init_database_cached(host, user, password, database, port):
         f"SERVER={host},{port};"
         f"DATABASE={database};"
         f"UID={user};PWD={password};"
-        "Encrypt=Optional;"
+        "Encrypt=no;"
         "TrustServerCertificate=yes;"
         "Connection Timeout=10;"
     )
