@@ -6,6 +6,7 @@ import logging
 import time
 import threading
 import uuid  # Import pour générer des identifiants uniques
+import urllib
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
@@ -24,6 +25,7 @@ import io
 import requests  # Added for HTTP requests to the backend
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import OperationalError
 import os, sys, socket, webbrowser
 
 
@@ -548,8 +550,18 @@ def num_tokens_from_string(string: str) -> int:
     tokens = max(1, len(string) // 4)
     logger.info(f"Tokens estimés pour la chaîne: {tokens}")
     return tokens
+    
+import urllib
+import logging
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import sessionmaker
+import streamlit as st
 
+logger = logging.getLogger(__name__)
+
+@st.cache_data
 def init_database_cached(host, user, password, database, port):
+<<<<<<< HEAD
     """
     Initialize the database connection using SQLAlchemy with a dynamically created connection string.
     """
@@ -559,10 +571,16 @@ def init_database_cached(host, user, password, database, port):
 
     # Compose the ODBC connection string exactly like your working pyodbc.connect
     conn_str = (
+=======
+    # Build an ODBC connection string—turn encryption off if the server
+    # only supports older TLS versions:
+    odbc_str = (
+>>>>>>> a3a9d33eea635f63c61d71aca89289917bfab1ee
         "DRIVER={ODBC Driver 17 for SQL Server};"
         f"SERVER={host},{port};"
         f"DATABASE={database};"
         f"UID={user};PWD={password};"
+<<<<<<< HEAD
         "Encrypt=no;"
         "TrustServerCertificate=yes;"
         "Connection Timeout=10;"
@@ -579,7 +597,20 @@ def init_database_cached(host, user, password, database, port):
         logger.error(f"Error connecting to the database: {e}")
         st.error(f"Erreur de connexion à la base de données: {e}")
         return None, None
+=======
+        "Encrypt=no;"                      # <-- disable if you still get SSL errors
+        "TrustServerCertificate=yes;"
+        "Connection Timeout=30;"
+    )
+    url = "mssql+pyodbc:///?odbc_connect=" + urllib.parse.quote_plus(odbc_str)
+>>>>>>> a3a9d33eea635f63c61d71aca89289917bfab1ee
 
+    engine = create_engine(url, connect_args={"fast_executemany": True})
+    # smoke-test
+    with engine.connect():
+        logger.info("ODBC connection successful.")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    return SessionLocal, engine
 
 
 @st.cache_data
