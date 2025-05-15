@@ -570,7 +570,7 @@ def init_database_cached(host, user, password, database, port):
 
     # Compose the ODBC connection string exactly like your working pyodbc.connect
     conn_str = (
-        "DRIVER={ODBC Driver 18 for SQL Server};"
+        "DRIVER={ODBC Driver 17 for SQL Server};"
         f"SERVER={host},{port};"
         f"DATABASE={database};"
         f"UID={user};PWD={password};"
